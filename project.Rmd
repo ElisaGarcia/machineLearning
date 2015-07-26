@@ -1,0 +1,105 @@
+---
+title: "Machine Learning Project"
+author: "Elisa Garcia"
+date: "25th July 2015"
+output: html_document
+---
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(caret)
+library(ggplot2)
+
+normalize <- function(x) {(x - min(x, na.rm=TRUE))/(max(x,na.rm=TRUE) - 
+min(x, na.rm=TRUE))}
+```
+#Prediction of correctness performing exercise
+
+Some data from 5 people have been taken in order to evaluate if a sport exercise is performed correctly or not. The data has been taken doing the exercises in 5 different manners (A, B, C, D, and E). 
+The goal of this project is build a predictor able to say in which manner the exercise has been done, taking into account the measurements taken. 
+
+### Read data training
+```{r}
+fileUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+con <- url(fileUrl)
+dataTrain <- read.csv(con)
+summary(dataTrain)
+```
+
+Taken a look to the summary of the dataTrain, we decide to exclude those data that are not complete (these data have from 19622 samples 19216 NA => they have much less information), the name of the participants, the timestamps, and the window data. 
+
+```{r}
+removeFeatures <- grepl("kurtosis|skewness|amplitude|_roll_|_yaw_|_pitch_|_picth_|var_accel_|var_total_accel|window|name|X|timestamp", names(dataTrain))
+
+dataCl <- dataTrain[, !removeFeatures]
+summary(dataCl)
+```
+
+Thinking about what we really need in order to do our predictions, we can assume that the x, y, and z components don't bring any additional data. That is due to the fact that, the other features already take into account all the measurements taken in the 3 directions.
+
+```{r}
+removeFeatures <- grepl("_x|_y|_z", names(dataCl))
+
+dataCl <- dataCl[, !removeFeatures]
+summary(dataCl)
+```
+
+Now, we have our data cleaner than at the very beginning, and we can start with the machine learning algorithm.
+
+We will plot the different characteristics depending on the measured taken, in order to see which characteristic have a higher correlation with the classe.
+
+```{r, cache = T}
+belt <- dataCl[, grepl("belt|classe", names(dataCl))]
+featurePlot(x = belt[,-ncol(belt)], y = belt$classe, plot="pairs")
+
+arm <- dataCl[, grepl("arm|classe", names(dataCl))]
+featurePlot(x = arm[,-ncol(arm)], y = arm$classe, plot="pairs")
+
+dumbbell <- dataCl[, grepl("dumbbel|classe", names(dataCl))]
+featurePlot(x = dumbbell[,-ncol(dumbbell)], y = dumbbell$classe, plot="pairs")
+
+forearm <- dataCl[, grepl("forearm|classe", names(dataCl))]
+featurePlot(x = forearm[,-ncol(forearm)], y = forearm$classe, plot="pairs")
+```
+
+We are going to use **rain forest** as method for building our prediction model. With this method, cross-validation is not needed, as it is already performed internally in the algorithm indeed. It uses bootstrapping in each node, not only for the data, but also with the features used. 
+
+```{r, cache=TRUE}
+fit <- train(classe ~., data = dataCl, method="rf", importance = T)
+
+fit$finalModel
+
+varImp(fit)
+```
+
+With this approach, we observe that the error in each node is about a 0.67%, that the error for each class is under 0.01, and the accuracy is around 0.98. 
+The number of variables tried at each split is 9, and the total number of trees built is 500.
+
+From the importance of the variables, we can see that the `roll_belt` is the one with a higher weigth, and that `pitch_arm` and `total_accel_arm` almost do not apport anything.
+
+```{r, echo=FALSE}
+input.matrix <- data.matrix(fit$finalModel$confusion)
+input.matrix.normalized <- normalize(input.matrix[1:5, 1:5])
+
+confusion <- as.data.frame(as.table(input.matrix.normalized))
+
+plot <- ggplot(confusion)
+plot + geom_tile(aes(x=Var1, y=Var2, fill=Freq)) + scale_x_discrete(name="Actual Class") + scale_y_discrete(name="Predicted Class") + scale_fill_gradient(breaks=seq(from=-.5, to=4, by=.2)) + labs(fill="Normalized\nFrequency")
+```
+
+In the figure we see the normalized confusion matrix. In it we can observe that the frequency of good predictions is much higher, close to 1, than the false positives or false negatives. 
+
+These results are the in sampling error. However, the out sampling error is going to be very close (surely worse), as the method used has been doing cv along its whole algorithm. And, taken a look to the test data, we see that all the predictions are ok! :)
+
+### Testing data
+```{r}
+fileUrlTest <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+conTest <- url(fileUrlTest)
+dataTest <- read.csv(conTest)
+
+predictions <- vector()
+for (i in 1:20)
+{
+  prediction <- predict(fit, newdata = dataTest[i,])
+  predictions <- c(predictions, as.character(prediction))
+}
+predictions
+```
